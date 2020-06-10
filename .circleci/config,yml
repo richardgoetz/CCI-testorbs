@@ -1,0 +1,1026 @@
+# Orb 'circleci/aws-eks@0.2.1' resolved to 'circleci/aws-eks@0.2.1'
+# Orb 'circleci/helm@0.1.1' resolved to 'circleci/helm@0.1.1'
+version: 2
+jobs:
+  aws-eks/create-cluster:
+    docker:
+    - image: circleci/python:3
+    steps:
+    - run:
+        command: |
+          if which aws-iam-authenticator > /dev/null; then
+            echo "AWS IAM Authenticator for Kubernetes is already installed"
+            exit 0
+          fi
+
+          PLATFORM="linux"
+          if [ -n "$(uname | grep "Darwin")" ]; then
+            PLATFORM="darwin"
+          fi
+
+          RELEASE_TAG=""
+          RELEASE_URL="https://api.github.com/repos/kubernetes-sigs/aws-iam-authenticator/releases/latest"
+
+          if [ -n "${RELEASE_TAG}" ]; then
+            RELEASE_URL="https://api.github.com/repos/kubernetes-sigs/aws-iam-authenticator/releases/tags/${RELEASE_TAG}"
+          fi
+
+          DOWNLOAD_URL=$(curl -s --retry 5 "${RELEASE_URL}" \
+              | grep "${PLATFORM}" | awk '/browser_download_url/ {print $2}' | sed 's/"//g')
+
+          curl -L -o aws-iam-authenticator "$DOWNLOAD_URL"
+
+          chmod +x ./aws-iam-authenticator
+
+          SUDO=""
+          if [ $(id -u) -ne 0 ] && which sudo > /dev/null ; then
+            SUDO="sudo"
+          fi
+
+          $SUDO mv ./aws-iam-authenticator /usr/local/bin/aws-iam-authenticator
+        name: Install the AWS IAM Authenticator for Kubernetes
+    - run:
+        command: |
+          if which eksctl > /dev/null; then
+            echo "eksctl is already installed"
+            exit 0
+          fi
+
+          mkdir -p eksctl_download
+          curl --silent --location --retry 5 "https://github.com/weaveworks/eksctl/releases/download/latest_release/eksctl_$(uname -s)_amd64.tar.gz" \
+            | tar xz -C eksctl_download
+          chmod +x eksctl_download/eksctl
+          SUDO=""
+          if [ $(id -u) -ne 0 ] && which sudo > /dev/null ; then
+            SUDO="sudo"
+          fi
+          $SUDO mv eksctl_download/eksctl /usr/local/bin/
+          rmdir eksctl_download
+        name: Install the eksctl tool
+    - run:
+        command: |
+          if [[ latest == "latest" ]]; then
+            # get latest kops release
+            KOPS_VERSION=$(curl -s https://api.github.com/repos/kubernetes/kops/releases/latest | grep tag_name | cut -d '"' -f 4)
+          else
+            KOPS_VERSION=latest
+          fi
+
+          PLATFORM="linux"
+          if [ -n "$(uname | grep "Darwin")" ]; then
+            PLATFORM="darwin"
+          fi
+
+          # download kops
+          curl -LO https://github.com/kubernetes/kops/releases/download/$KOPS_VERSION/kops-$PLATFORM-amd64
+
+          [ -w /usr/local/bin ] && SUDO="" || SUDO=sudo
+
+          $SUDO chmod +x kops-$PLATFORM-amd64
+
+          $SUDO mv kops-$PLATFORM-amd64 /usr/local/bin/kops
+        name: Install kops
+    - run:
+        command: |
+          if [[ latest == "latest" ]]; then
+            # get latest kubectl release
+            KUBECTL_VERSION=$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)
+          else
+            KUBECTL_VERSION=latest
+          fi
+
+          PLATFORM="linux"
+          if [ -n "$(uname | grep "Darwin")" ]; then
+            PLATFORM="darwin"
+          fi
+
+          # download kubectl
+          curl -LO https://storage.googleapis.com/kubernetes-release/release/$KUBECTL_VERSION/bin/$PLATFORM/amd64/kubectl
+
+          [ -w /usr/local/bin ] && SUDO="" || SUDO=sudo
+
+          $SUDO chmod +x ./kubectl
+
+          $SUDO mv ./kubectl /usr/local/bin
+        name: Install kubectl
+    - run:
+        command: |+
+          CLUSTER_NAME="test-cluster"
+          AWS_REGION=""
+          AWS_PROFILE=""
+          ZONES=""
+          KUBERNETES_VERSION=""
+          CONFIG_FILE=""
+          VPC_PRIVATE_SUBNETS=""
+          VPC_PUBLIC_SUBNETS=""
+          NODEGROUP_NAME=""
+          WITHOUT_NODEGROUP="false"
+          NODE_PRIVATE_NETWORKING="false"
+          NODE_TYPE=""
+          NODE_AMI=""
+          NODE_AMI_FAMILY=""
+          NODES="-1"
+          NODES_MIN="-1"
+          NODES_MAX="-1"
+          NODE_VOLUME_SIZE="-1"
+          NODE_VOLUME_TYPE=""
+          MAX_PODS_PER_NODE="-1"
+          NODE_SECURITY_GROUPS=""
+          NODE_LABELS=""
+          NODE_ZONES=""
+          SSH_ACCESS="false"
+          SSH_PUBLIC_KEY=""
+          ASG_ACCESS="false"
+          EXTERNAL_DNS_ACCESS="false"
+          FULL_ECR_ACCESS="false"
+          VPC_CIDR=""
+          VPC_PRIVATE_SUBNETS=""
+          VPC_PUBLIC_SUBNETS=""
+          VPC_FROM_KOPS_CLUSTER=""
+          CFN_ROLE_ARN=""
+          TAGS=""
+          AWS_MAX_POLLING_WAIT_TIME="20m0s"
+          VERBOSE="3"
+          if [ -n "${CLUSTER_NAME}" ]; then
+            set -- "$@" --name="${CLUSTER_NAME}"
+          fi
+          if [ -n "${AWS_REGION}" ]; then
+            set -- "$@" --region="${AWS_REGION}"
+          fi
+          if [ -n "${AWS_PROFILE}" ]; then
+            set -- "$@" --profile="${AWS_PROFILE}"
+          fi
+          if [ -n "${ZONES}" ]; then
+            set -- "$@" --zones="${ZONES}"
+          fi
+          if [ -n "${KUBERNETES_VERSION}" ]; then
+            set -- "$@" --version="${KUBERNETES_VERSION}"
+          fi
+          if [ -n "${CONFIG_FILE}" ]; then
+            set -- "$@" --config-file="${CONFIG_FILE}"
+          fi
+          if [ -n "${VPC_PRIVATE_SUBNETS}" ]; then
+            set -- "$@" --vpc-private-subnets="${VPC_PRIVATE_SUBNETS}"
+          fi
+          if [ -n "${VPC_PUBLIC_SUBNETS}" ]; then
+            set -- "$@" --vpc-public-subnets="${VPC_PUBLIC_SUBNETS}"
+          fi
+          if [ -n "${NODEGROUP_NAME}" ]; then
+            set -- "$@" --nodegroup-name="${NODEGROUP_NAME}"
+          fi
+          if [ "${WITHOUT_NODEGROUP}" == "true" ]; then
+            set -- "$@" --without-nodegroup
+          fi
+          if [ "${NODE_PRIVATE_NETWORKING}" == "true" ]; then
+            set -- "$@" --node-private-networking
+          fi
+          if [ -n "${NODE_TYPE}" ]; then
+            set -- "$@" --node-type="${NODE_TYPE}"
+          fi
+          if [ -n "${NODE_AMI}" ]; then
+            set -- "$@" --node-ami="${NODE_AMI}"
+          fi
+          if [ -n "${NODE_AMI_FAMILY}" ]; then
+            set -- "$@" --node-ami-family="${NODE_AMI_FAMILY}"
+          fi
+          if [ "${NODES}" != "-1" ]; then
+            set -- "$@" --nodes="${NODES}"
+          fi
+          if [ "${NODES_MIN}" != "-1" ]; then
+            set -- "$@" --nodes-min="${NODES_MIN}"
+          fi
+          if [ "${NODES_MAX}" != "-1" ]; then
+            set -- "$@" --nodes-max="${NODES_MAX}"
+          fi
+          if [ "${NODE_VOLUME_SIZE}" != "-1" ]; then
+            set -- "$@" --node-volume-size="${NODE_VOLUME_SIZE}"
+          fi
+          if [ -n "${NODE_VOLUME_TYPE}" ]; then
+            set -- "$@" --node-volume-type="${NODE_VOLUME_TYPE}"
+          fi
+          if [ "${MAX_PODS_PER_NODE}" != "-1" ]; then
+            set -- "$@" --max-pods-per-node="${MAX_PODS_PER_NODE}"
+          fi
+          if [ -n "${NODE_SECURITY_GROUPS}" ]; then
+            set -- "$@" --node-security-groups="${NODE_SECURITY_GROUPS}"
+          fi
+          if [ -n "${NODE_LABELS}" ]; then
+            set -- "$@" --node-labels="${NODE_LABELS}"
+          fi
+          if [ -n "${NODE_ZONES}" ]; then
+            set -- "$@" --node-zones="${NODE_ZONES}"
+          fi
+          if [ "${SSH_ACCESS}" == "true" ]; then
+            set -- "$@" --ssh-access
+          fi
+          if [ -n "${SSH_PUBLIC_KEY}" ]; then
+            set -- "$@" --ssh-public-key="${SSH_PUBLIC_KEY}"
+          fi
+          if [ "${ASG_ACCESS}" == "true" ]; then
+            set -- "$@" --asg-access
+          fi
+          if [ "${EXTERNAL_DNS_ACCESS}" == "true" ]; then
+            set -- "$@" --external-dns-access
+          fi
+          if [ "${FULL_ECR_ACCESS}" == "true" ]; then
+            set -- "$@" --full-ecr-access
+          fi
+          if [ -n "${VPC_CIDR}" ]; then
+            set -- "$@" --vpc-cidr="${VPC_CIDR}"
+          fi
+          if [ -n "${VPC_PRIVATE_SUBNETS}" ]; then
+            set -- "$@" --vpc-private-subnets="${VPC_PRIVATE_SUBNETS}"
+          fi
+          if [ -n "${VPC_PUBLIC_SUBNETS}" ]; then
+            set -- "$@" --vpc-public-subnets="${VPC_PUBLIC_SUBNETS}"
+          fi
+          if [ -n "${VPC_FROM_KOPS_CLUSTER}" ]; then
+            set -- "$@" --vpc-from-kops-cluster="${VPC_FROM_KOPS_CLUSTER}"
+          fi
+          if [ -n "${CFN_ROLE_ARN}" ]; then
+            set -- "$@" --cfn-role-arn="${CFN_ROLE_ARN}"
+          fi
+          if [ -n "${AWS_MAX_POLLING_WAIT_TIME}" ]; then
+            set -- "$@" --timeout="${AWS_MAX_POLLING_WAIT_TIME}"
+          fi
+          if [ -n "${TAGS}" ]; then
+            set -- "$@" --tags="${TAGS}"
+          fi
+          set -- "$@" --verbose=${VERBOSE}
+
+          eksctl create cluster "$@"
+
+        name: Create EKS cluster and associated resources
+        no_output_timeout: 45m
+    - run:
+        command: |+
+          CLUSTER_NAME="test-cluster"
+          AWS_REGION=""
+          AWS_PROFILE=""
+          VERBOSE="3"
+          if [ -n "${CLUSTER_NAME}" ]; then
+            set -- "$@" --name "${CLUSTER_NAME}"
+          fi
+          if [ -n "${AWS_REGION}" ]; then
+            set -- "$@" --region "${AWS_REGION}"
+          fi
+          if [ -n "${AWS_PROFILE}" ]; then
+            set -- "$@" --profile="${AWS_PROFILE}"
+          fi
+          set -- "$@" --verbose ${VERBOSE}
+
+          eksctl get cluster --name=test-cluster "$@"
+
+        name: Verify cluster
+  install-helm-on-cluster:
+    docker:
+    - image: circleci/python:latest
+    steps:
+    - run:
+        command: |
+          if [[ latest == "latest" ]]; then
+            # get latest kops release
+            KOPS_VERSION=$(curl -s https://api.github.com/repos/kubernetes/kops/releases/latest | grep tag_name | cut -d '"' -f 4)
+          else
+            KOPS_VERSION=latest
+          fi
+
+          PLATFORM="linux"
+          if [ -n "$(uname | grep "Darwin")" ]; then
+            PLATFORM="darwin"
+          fi
+
+          # download kops
+          curl -LO https://github.com/kubernetes/kops/releases/download/$KOPS_VERSION/kops-$PLATFORM-amd64
+
+          [ -w /usr/local/bin ] && SUDO="" || SUDO=sudo
+
+          $SUDO chmod +x kops-$PLATFORM-amd64
+
+          $SUDO mv kops-$PLATFORM-amd64 /usr/local/bin/kops
+        name: Install kops
+    - run:
+        command: |
+          if [[ latest == "latest" ]]; then
+            # get latest kubectl release
+            KUBECTL_VERSION=$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)
+          else
+            KUBECTL_VERSION=latest
+          fi
+
+          PLATFORM="linux"
+          if [ -n "$(uname | grep "Darwin")" ]; then
+            PLATFORM="darwin"
+          fi
+
+          # download kubectl
+          curl -LO https://storage.googleapis.com/kubernetes-release/release/$KUBECTL_VERSION/bin/$PLATFORM/amd64/kubectl
+
+          [ -w /usr/local/bin ] && SUDO="" || SUDO=sudo
+
+          $SUDO chmod +x ./kubectl
+
+          $SUDO mv ./kubectl /usr/local/bin
+        name: Install kubectl
+    - run:
+        command: |
+          if which aws-iam-authenticator > /dev/null; then
+            echo "AWS IAM Authenticator for Kubernetes is already installed"
+            exit 0
+          fi
+
+          PLATFORM="linux"
+          if [ -n "$(uname | grep "Darwin")" ]; then
+            PLATFORM="darwin"
+          fi
+
+          RELEASE_TAG=""
+          RELEASE_URL="https://api.github.com/repos/kubernetes-sigs/aws-iam-authenticator/releases/latest"
+
+          if [ -n "${RELEASE_TAG}" ]; then
+            RELEASE_URL="https://api.github.com/repos/kubernetes-sigs/aws-iam-authenticator/releases/tags/${RELEASE_TAG}"
+          fi
+
+          DOWNLOAD_URL=$(curl -s --retry 5 "${RELEASE_URL}" \
+              | grep "${PLATFORM}" | awk '/browser_download_url/ {print $2}' | sed 's/"//g')
+
+          curl -L -o aws-iam-authenticator "$DOWNLOAD_URL"
+
+          chmod +x ./aws-iam-authenticator
+
+          SUDO=""
+          if [ $(id -u) -ne 0 ] && which sudo > /dev/null ; then
+            SUDO="sudo"
+          fi
+
+          $SUDO mv ./aws-iam-authenticator /usr/local/bin/aws-iam-authenticator
+        name: Install the AWS IAM Authenticator for Kubernetes
+    - run:
+        name: Install AWS CLI
+        command: |
+          export PIP=$(which pip pip3 | head -1)
+          if [[ -n $PIP ]]; then
+            if which sudo > /dev/null; then
+              sudo $PIP install awscli --upgrade
+            else
+              # This installs the AWS CLI to ~/.local/bin. Make sure that ~/.local/bin is in your $PATH.
+              $PIP install aws --upgrade --user
+            fi
+          elif [[ $(which unzip curl | wc -l) -eq 2 ]]; then
+            cd
+            curl "https://s3.amazonaws.com/aws-cli/awscli-bundle.zip" -o "awscli-bundle.zip"
+            unzip awscli-bundle.zip
+            if which sudo > /dev/null; then
+              sudo ~/awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws
+            else
+              # This installs the AWS CLI to the default location (~/.local/lib/aws) and create a symbolic link (symlink) at ~/bin/aws. Make sure that ~/bin is in your $PATH.
+              awscli-bundle/install -b ~/bin/aws
+            fi
+            rm -rf awscli-bundle*
+            cd -
+          else
+            echo "Unable to install AWS CLI. Please install pip."
+            exit 1
+          fi
+    - run:
+        command: |
+          CLUSTER_NAME="test-cluster"
+          AWS_REGION=""
+          AWS_PROFILE=""
+          KUBECONFIG_FILE_PATH=""
+          ROLE_ARN=""
+          CLUSTER_CONTEXT_ALIAS=""
+          DRY_RUN="false"
+          VERBOSE="false"
+          if [ -n "${CLUSTER_NAME}" ]; then
+            set -- "$@" --name "${CLUSTER_NAME}"
+          fi
+          if [ -n "${AWS_REGION}" ]; then
+            set -- "$@" --region "${AWS_REGION}"
+          fi
+          if [ -n "${AWS_PROFILE}" ]; then
+            set -- "$@" --profile "${AWS_PROFILE}"
+          fi
+          if [ -n "${KUBECONFIG_FILE_PATH}" ]; then
+            set -- "$@" --kubeconfig "${KUBECONFIG_FILE_PATH}"
+          fi
+          if [ -n "${ROLE_ARN}" ]; then
+            set -- "$@" --role-arn "${ROLE_ARN}"
+          fi
+          if [ -n "${CLUSTER_CONTEXT_ALIAS}" ]; then
+            set -- "$@" --alias "${CLUSTER_CONTEXT_ALIAS}"
+          fi
+          if [ "${DRY_RUN}" == "true" ]; then
+            set -- "$@" --dry-run
+          fi
+          if [ "${VERBOSE}" == "true" ]; then
+            set -- "$@" --verbose
+          fi
+          aws eks update-kubeconfig "$@"
+        name: Update the kubectl configuration file to use the authenticator
+    - run:
+        command: |
+          if which helm > /dev/null; then
+            echo "helm is already installed"
+            exit 0
+          fi
+          INSTALL_SCRIPT="https://raw.githubusercontent.com/helm/helm/master/scripts/get"
+          curl "${INSTALL_SCRIPT}" > get_helm.sh
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+          helm init --client-only
+        name: Install and init the helm client
+    - run:
+        command: |
+          SERVICE_ACCOUNT=""
+          if [ -z "${SERVICE_ACCOUNT}" ]; then
+            SERVICE_ACCOUNT="tiller"
+          fi
+          kubectl create serviceaccount ${SERVICE_ACCOUNT}\
+            --namespace kube-system
+          kubectl create clusterrolebinding tiller-clusterrolebinding \
+            --clusterrole=cluster-admin \
+            --serviceaccount=kube-system:${SERVICE_ACCOUNT}
+        name: Create service account with cluster-admin role for Tiller
+    - run:
+        command: |
+          TILLER_TLS="false"
+          TILLER_TLS_CERT=""
+          TILLER_TLS_HOSTNAME=""
+          TILLER_TLS_KEY=""
+          TILLER_TLS_VERIFY="false"
+          TILLER_CA_CERT=""
+          WAIT="true"
+          SERVICE_ACCOUNT=""
+          TILLER_NAMESPACE=""
+          ENABLE_CLUSTER_ADMIN_ACCESS="true"
+          if [ "${TILLER_TLS}" == "true" ]; then
+            set -- "$@" --tiller-tls
+          fi
+          if [ -n "${TILLER_TLS_CERT}" ]; then
+            set -- "$@" --tiller-tls-cert "${TILLER_TLS_CERT}"
+          fi
+          if [ -n "${TILLER_TLS_HOSTNAME}" ]; then
+            set -- "$@" --tiller-tls-hostname "${TILLER_TLS_HOSTNAME}"
+          fi
+          if [ -n "${TILLER_TLS_KEY}" ]; then
+            set -- "$@" --tiller-tls-key "${TILLER_TLS_KEY}"
+          fi
+          if [ "${TILLER_TLS_VERIFY}" == "true" ]; then
+            set -- "$@" --tiller-tls-verify
+          fi
+          if [ -n "${TILLER_CA_CERT}" ]; then
+            set -- "$@" --tiller-ca-cert "${TILLER_CA_CERT}"
+          fi
+          if [ -n "${SERVICE_ACCOUNT}" ]; then
+            set -- "$@" --service-account "${SERVICE_ACCOUNT}"
+          elif [ "${ENABLE_CLUSTER_ADMIN_ACCESS}" == "true" ]; then
+              set -- "$@" --service-account tiller
+          fi
+          if [ -n "${TILLER_NAMESPACE}" ]; then
+            set -- "$@" --tiller-namespace "${TILLER_NAMESPACE}"
+          fi
+          if [ "${WAIT}" == "true" ]; then
+            set -- "$@" --wait
+          fi
+          helm init "$@"
+        name: Install tiller into the cluster
+  install-helm-chart:
+    docker:
+    - image: circleci/python:latest
+    steps:
+    - run:
+        command: |
+          if which aws-iam-authenticator > /dev/null; then
+            echo "AWS IAM Authenticator for Kubernetes is already installed"
+            exit 0
+          fi
+
+          PLATFORM="linux"
+          if [ -n "$(uname | grep "Darwin")" ]; then
+            PLATFORM="darwin"
+          fi
+
+          RELEASE_TAG=""
+          RELEASE_URL="https://api.github.com/repos/kubernetes-sigs/aws-iam-authenticator/releases/latest"
+
+          if [ -n "${RELEASE_TAG}" ]; then
+            RELEASE_URL="https://api.github.com/repos/kubernetes-sigs/aws-iam-authenticator/releases/tags/${RELEASE_TAG}"
+          fi
+
+          DOWNLOAD_URL=$(curl -s --retry 5 "${RELEASE_URL}" \
+              | grep "${PLATFORM}" | awk '/browser_download_url/ {print $2}' | sed 's/"//g')
+
+          curl -L -o aws-iam-authenticator "$DOWNLOAD_URL"
+
+          chmod +x ./aws-iam-authenticator
+
+          SUDO=""
+          if [ $(id -u) -ne 0 ] && which sudo > /dev/null ; then
+            SUDO="sudo"
+          fi
+
+          $SUDO mv ./aws-iam-authenticator /usr/local/bin/aws-iam-authenticator
+        name: Install the AWS IAM Authenticator for Kubernetes
+    - run:
+        name: Install AWS CLI
+        command: |
+          export PIP=$(which pip pip3 | head -1)
+          if [[ -n $PIP ]]; then
+            if which sudo > /dev/null; then
+              sudo $PIP install awscli --upgrade
+            else
+              # This installs the AWS CLI to ~/.local/bin. Make sure that ~/.local/bin is in your $PATH.
+              $PIP install aws --upgrade --user
+            fi
+          elif [[ $(which unzip curl | wc -l) -eq 2 ]]; then
+            cd
+            curl "https://s3.amazonaws.com/aws-cli/awscli-bundle.zip" -o "awscli-bundle.zip"
+            unzip awscli-bundle.zip
+            if which sudo > /dev/null; then
+              sudo ~/awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws
+            else
+              # This installs the AWS CLI to the default location (~/.local/lib/aws) and create a symbolic link (symlink) at ~/bin/aws. Make sure that ~/bin is in your $PATH.
+              awscli-bundle/install -b ~/bin/aws
+            fi
+            rm -rf awscli-bundle*
+            cd -
+          else
+            echo "Unable to install AWS CLI. Please install pip."
+            exit 1
+          fi
+    - run:
+        command: |
+          CLUSTER_NAME="test-cluster"
+          AWS_REGION=""
+          AWS_PROFILE=""
+          KUBECONFIG_FILE_PATH=""
+          ROLE_ARN=""
+          CLUSTER_CONTEXT_ALIAS=""
+          DRY_RUN="false"
+          VERBOSE="false"
+          if [ -n "${CLUSTER_NAME}" ]; then
+            set -- "$@" --name "${CLUSTER_NAME}"
+          fi
+          if [ -n "${AWS_REGION}" ]; then
+            set -- "$@" --region "${AWS_REGION}"
+          fi
+          if [ -n "${AWS_PROFILE}" ]; then
+            set -- "$@" --profile "${AWS_PROFILE}"
+          fi
+          if [ -n "${KUBECONFIG_FILE_PATH}" ]; then
+            set -- "$@" --kubeconfig "${KUBECONFIG_FILE_PATH}"
+          fi
+          if [ -n "${ROLE_ARN}" ]; then
+            set -- "$@" --role-arn "${ROLE_ARN}"
+          fi
+          if [ -n "${CLUSTER_CONTEXT_ALIAS}" ]; then
+            set -- "$@" --alias "${CLUSTER_CONTEXT_ALIAS}"
+          fi
+          if [ "${DRY_RUN}" == "true" ]; then
+            set -- "$@" --dry-run
+          fi
+          if [ "${VERBOSE}" == "true" ]; then
+            set -- "$@" --verbose
+          fi
+          aws eks update-kubeconfig "$@"
+        name: Update the kubectl configuration file to use the authenticator
+    - run:
+        command: |
+          if which helm > /dev/null; then
+            echo "helm is already installed"
+            exit 0
+          fi
+          INSTALL_SCRIPT="https://raw.githubusercontent.com/helm/helm/master/scripts/get"
+          curl "${INSTALL_SCRIPT}" > get_helm.sh
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+          helm init --client-only
+        name: Install and init the helm client
+    - run:
+        command: |
+          helm repo update
+        name: Update repository
+    - run:
+        command: |
+          RELEASE_NAME="grafana-release"
+          VALUES_TO_OVERRIDE=""
+          NAMESPACE=""
+          TLS="false"
+          TLS_CA_CERT=""
+          TLS_CERT=""
+          TLS_HOSTNAME=""
+          TLS_KEY=""
+          TLS_VERIFY="false"
+          TILLER_NAMESPACE=""
+          WAIT="true"
+          if [ -n "${RELEASE_NAME}" ]; then
+            set -- "$@" --name "${RELEASE_NAME}"
+          fi
+          if [ -n "${VALUES_TO_OVERRIDE}" ]; then
+            set -- "$@" --set "${VALUES_TO_OVERRIDE}"
+          fi
+          if [ -n "${NAMESPACE}" ]; then
+            set -- "$@" --namespace="${NAMESPACE}"
+          fi
+          if [ "${TLS}" == "true" ]; then
+            set -- "$@" --tls
+          fi
+          if [ -n "${TLS_CA_CERT}" ]; then
+            set -- "$@" --tls-ca-cert="${TLS_CA_CERT}"
+          fi
+          if [ -n "${TLS_CERT}" ]; then
+            set -- "$@" --tls-cert="${TLS_CERT}"
+          fi
+          if [ -n "${TLS_HOSTNAME}" ]; then
+            set -- "$@" --tls-hostname="${TLS_HOSTNAME}"
+          fi
+          if [ -n "${TLS_KEY}" ]; then
+            set -- "$@" --tls-key="${TLS_KEY}"
+          fi
+          if [ "${TLS_VERIFY}" == "true" ]; then
+            set -- "$@" --tls-verify
+          fi
+          if [ -n "${TILLER_NAMESPACE}" ]; then
+            set -- "$@" --tiller-namespace "${TILLER_NAMESPACE}"
+          fi
+          if [ "${WAIT}" == "true" ]; then
+            set -- "$@" --wait
+          fi
+          helm install stable/grafana "$@"
+        name: Install chart
+  delete-helm-release:
+    docker:
+    - image: circleci/python:latest
+    steps:
+    - run:
+        command: |
+          if which aws-iam-authenticator > /dev/null; then
+            echo "AWS IAM Authenticator for Kubernetes is already installed"
+            exit 0
+          fi
+
+          PLATFORM="linux"
+          if [ -n "$(uname | grep "Darwin")" ]; then
+            PLATFORM="darwin"
+          fi
+
+          RELEASE_TAG=""
+          RELEASE_URL="https://api.github.com/repos/kubernetes-sigs/aws-iam-authenticator/releases/latest"
+
+          if [ -n "${RELEASE_TAG}" ]; then
+            RELEASE_URL="https://api.github.com/repos/kubernetes-sigs/aws-iam-authenticator/releases/tags/${RELEASE_TAG}"
+          fi
+
+          DOWNLOAD_URL=$(curl -s --retry 5 "${RELEASE_URL}" \
+              | grep "${PLATFORM}" | awk '/browser_download_url/ {print $2}' | sed 's/"//g')
+
+          curl -L -o aws-iam-authenticator "$DOWNLOAD_URL"
+
+          chmod +x ./aws-iam-authenticator
+
+          SUDO=""
+          if [ $(id -u) -ne 0 ] && which sudo > /dev/null ; then
+            SUDO="sudo"
+          fi
+
+          $SUDO mv ./aws-iam-authenticator /usr/local/bin/aws-iam-authenticator
+        name: Install the AWS IAM Authenticator for Kubernetes
+    - run:
+        name: Install AWS CLI
+        command: |
+          export PIP=$(which pip pip3 | head -1)
+          if [[ -n $PIP ]]; then
+            if which sudo > /dev/null; then
+              sudo $PIP install awscli --upgrade
+            else
+              # This installs the AWS CLI to ~/.local/bin. Make sure that ~/.local/bin is in your $PATH.
+              $PIP install aws --upgrade --user
+            fi
+          elif [[ $(which unzip curl | wc -l) -eq 2 ]]; then
+            cd
+            curl "https://s3.amazonaws.com/aws-cli/awscli-bundle.zip" -o "awscli-bundle.zip"
+            unzip awscli-bundle.zip
+            if which sudo > /dev/null; then
+              sudo ~/awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws
+            else
+              # This installs the AWS CLI to the default location (~/.local/lib/aws) and create a symbolic link (symlink) at ~/bin/aws. Make sure that ~/bin is in your $PATH.
+              awscli-bundle/install -b ~/bin/aws
+            fi
+            rm -rf awscli-bundle*
+            cd -
+          else
+            echo "Unable to install AWS CLI. Please install pip."
+            exit 1
+          fi
+    - run:
+        command: |
+          CLUSTER_NAME="test-cluster"
+          AWS_REGION=""
+          AWS_PROFILE=""
+          KUBECONFIG_FILE_PATH=""
+          ROLE_ARN=""
+          CLUSTER_CONTEXT_ALIAS=""
+          DRY_RUN="false"
+          VERBOSE="false"
+          if [ -n "${CLUSTER_NAME}" ]; then
+            set -- "$@" --name "${CLUSTER_NAME}"
+          fi
+          if [ -n "${AWS_REGION}" ]; then
+            set -- "$@" --region "${AWS_REGION}"
+          fi
+          if [ -n "${AWS_PROFILE}" ]; then
+            set -- "$@" --profile "${AWS_PROFILE}"
+          fi
+          if [ -n "${KUBECONFIG_FILE_PATH}" ]; then
+            set -- "$@" --kubeconfig "${KUBECONFIG_FILE_PATH}"
+          fi
+          if [ -n "${ROLE_ARN}" ]; then
+            set -- "$@" --role-arn "${ROLE_ARN}"
+          fi
+          if [ -n "${CLUSTER_CONTEXT_ALIAS}" ]; then
+            set -- "$@" --alias "${CLUSTER_CONTEXT_ALIAS}"
+          fi
+          if [ "${DRY_RUN}" == "true" ]; then
+            set -- "$@" --dry-run
+          fi
+          if [ "${VERBOSE}" == "true" ]; then
+            set -- "$@" --verbose
+          fi
+          aws eks update-kubeconfig "$@"
+        name: Update the kubectl configuration file to use the authenticator
+    - run:
+        command: |
+          if which helm > /dev/null; then
+            echo "helm is already installed"
+            exit 0
+          fi
+          INSTALL_SCRIPT="https://raw.githubusercontent.com/helm/helm/master/scripts/get"
+          curl "${INSTALL_SCRIPT}" > get_helm.sh
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+          helm init --client-only
+        name: Install and init the helm client
+    - run:
+        command: |
+          RELEASE_NAME="grafana-release"
+          PURGE="true"
+          TIMEOUT="600"
+          NAMESPACE=""
+          TLS="false"
+          TLS_CA_CERT=""
+          TLS_CERT=""
+          TLS_HOSTNAME=""
+          TLS_KEY=""
+          TLS_VERIFY="false"
+          TILLER_NAMESPACE=""
+          if [ "${PURGE}" == "true" ]; then
+            set -- "$@" --purge
+          fi
+          if [ "${TIMEOUT}" != "-1" ]; then
+            set -- "$@" --timeout="${TIMEOUT}"
+          fi
+          if [ -n "${NAMESPACE}" ]; then
+            set -- "$@" --namespace="${NAMESPACE}"
+          fi
+          if [ "${TLS}" == "true" ]; then
+            set -- "$@" --tls
+          fi
+          if [ -n "${TLS_CA_CERT}" ]; then
+            set -- "$@" --tls-ca-cert="${TLS_CA_CERT}"
+          fi
+          if [ -n "${TLS_CERT}" ]; then
+            set -- "$@" --tls-cert="${TLS_CERT}"
+          fi
+          if [ -n "${TLS_HOSTNAME}" ]; then
+            set -- "$@" --tls-hostname="${TLS_HOSTNAME}"
+          fi
+          if [ -n "${TLS_KEY}" ]; then
+            set -- "$@" --tls-key="${TLS_KEY}"
+          fi
+          if [ "${TLS_VERIFY}" == "true" ]; then
+            set -- "$@" --tls-verify
+          fi
+          if [ -n "${TILLER_NAMESPACE}" ]; then
+            set -- "$@" --tiller-namespace "${TILLER_NAMESPACE}"
+          fi
+          helm delete "$@" grafana-release
+        name: Delete helm release
+  aws-eks/delete-cluster:
+    docker:
+    - image: circleci/python:3
+    steps:
+    - run:
+        command: |
+          if [[ latest == "latest" ]]; then
+            # get latest kops release
+            KOPS_VERSION=$(curl -s https://api.github.com/repos/kubernetes/kops/releases/latest | grep tag_name | cut -d '"' -f 4)
+          else
+            KOPS_VERSION=latest
+          fi
+
+          PLATFORM="linux"
+          if [ -n "$(uname | grep "Darwin")" ]; then
+            PLATFORM="darwin"
+          fi
+
+          # download kops
+          curl -LO https://github.com/kubernetes/kops/releases/download/$KOPS_VERSION/kops-$PLATFORM-amd64
+
+          [ -w /usr/local/bin ] && SUDO="" || SUDO=sudo
+
+          $SUDO chmod +x kops-$PLATFORM-amd64
+
+          $SUDO mv kops-$PLATFORM-amd64 /usr/local/bin/kops
+        name: Install kops
+    - run:
+        command: |
+          if [[ latest == "latest" ]]; then
+            # get latest kubectl release
+            KUBECTL_VERSION=$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)
+          else
+            KUBECTL_VERSION=latest
+          fi
+
+          PLATFORM="linux"
+          if [ -n "$(uname | grep "Darwin")" ]; then
+            PLATFORM="darwin"
+          fi
+
+          # download kubectl
+          curl -LO https://storage.googleapis.com/kubernetes-release/release/$KUBECTL_VERSION/bin/$PLATFORM/amd64/kubectl
+
+          [ -w /usr/local/bin ] && SUDO="" || SUDO=sudo
+
+          $SUDO chmod +x ./kubectl
+
+          $SUDO mv ./kubectl /usr/local/bin
+        name: Install kubectl
+    - run:
+        command: |
+          if which aws-iam-authenticator > /dev/null; then
+            echo "AWS IAM Authenticator for Kubernetes is already installed"
+            exit 0
+          fi
+
+          PLATFORM="linux"
+          if [ -n "$(uname | grep "Darwin")" ]; then
+            PLATFORM="darwin"
+          fi
+
+          RELEASE_TAG=""
+          RELEASE_URL="https://api.github.com/repos/kubernetes-sigs/aws-iam-authenticator/releases/latest"
+
+          if [ -n "${RELEASE_TAG}" ]; then
+            RELEASE_URL="https://api.github.com/repos/kubernetes-sigs/aws-iam-authenticator/releases/tags/${RELEASE_TAG}"
+          fi
+
+          DOWNLOAD_URL=$(curl -s --retry 5 "${RELEASE_URL}" \
+              | grep "${PLATFORM}" | awk '/browser_download_url/ {print $2}' | sed 's/"//g')
+
+          curl -L -o aws-iam-authenticator "$DOWNLOAD_URL"
+
+          chmod +x ./aws-iam-authenticator
+
+          SUDO=""
+          if [ $(id -u) -ne 0 ] && which sudo > /dev/null ; then
+            SUDO="sudo"
+          fi
+
+          $SUDO mv ./aws-iam-authenticator /usr/local/bin/aws-iam-authenticator
+        name: Install the AWS IAM Authenticator for Kubernetes
+    - run:
+        name: Install AWS CLI
+        command: |
+          export PIP=$(which pip pip3 | head -1)
+          if [[ -n $PIP ]]; then
+            if which sudo > /dev/null; then
+              sudo $PIP install awscli --upgrade
+            else
+              # This installs the AWS CLI to ~/.local/bin. Make sure that ~/.local/bin is in your $PATH.
+              $PIP install aws --upgrade --user
+            fi
+          elif [[ $(which unzip curl | wc -l) -eq 2 ]]; then
+            cd
+            curl "https://s3.amazonaws.com/aws-cli/awscli-bundle.zip" -o "awscli-bundle.zip"
+            unzip awscli-bundle.zip
+            if which sudo > /dev/null; then
+              sudo ~/awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws
+            else
+              # This installs the AWS CLI to the default location (~/.local/lib/aws) and create a symbolic link (symlink) at ~/bin/aws. Make sure that ~/bin is in your $PATH.
+              awscli-bundle/install -b ~/bin/aws
+            fi
+            rm -rf awscli-bundle*
+            cd -
+          else
+            echo "Unable to install AWS CLI. Please install pip."
+            exit 1
+          fi
+    - run:
+        command: |
+          CLUSTER_NAME="test-cluster"
+          AWS_REGION=""
+          AWS_PROFILE=""
+          KUBECONFIG_FILE_PATH=""
+          ROLE_ARN=""
+          CLUSTER_CONTEXT_ALIAS=""
+          DRY_RUN="false"
+          VERBOSE="false"
+          if [ -n "${CLUSTER_NAME}" ]; then
+            set -- "$@" --name "${CLUSTER_NAME}"
+          fi
+          if [ -n "${AWS_REGION}" ]; then
+            set -- "$@" --region "${AWS_REGION}"
+          fi
+          if [ -n "${AWS_PROFILE}" ]; then
+            set -- "$@" --profile "${AWS_PROFILE}"
+          fi
+          if [ -n "${KUBECONFIG_FILE_PATH}" ]; then
+            set -- "$@" --kubeconfig "${KUBECONFIG_FILE_PATH}"
+          fi
+          if [ -n "${ROLE_ARN}" ]; then
+            set -- "$@" --role-arn "${ROLE_ARN}"
+          fi
+          if [ -n "${CLUSTER_CONTEXT_ALIAS}" ]; then
+            set -- "$@" --alias "${CLUSTER_CONTEXT_ALIAS}"
+          fi
+          if [ "${DRY_RUN}" == "true" ]; then
+            set -- "$@" --dry-run
+          fi
+          if [ "${VERBOSE}" == "true" ]; then
+            set -- "$@" --verbose
+          fi
+          aws eks update-kubeconfig "$@"
+        name: Update the kubectl configuration file to use the authenticator
+    - run:
+        command: |
+          if which eksctl > /dev/null; then
+            echo "eksctl is already installed"
+            exit 0
+          fi
+
+          mkdir -p eksctl_download
+          curl --silent --location --retry 5 "https://github.com/weaveworks/eksctl/releases/download/latest_release/eksctl_$(uname -s)_amd64.tar.gz" \
+            | tar xz -C eksctl_download
+          chmod +x eksctl_download/eksctl
+          SUDO=""
+          if [ $(id -u) -ne 0 ] && which sudo > /dev/null ; then
+            SUDO="sudo"
+          fi
+          $SUDO mv eksctl_download/eksctl /usr/local/bin/
+          rmdir eksctl_download
+        name: Install the eksctl tool
+    - run:
+        command: |+
+          CLUSTER_NAME="test-cluster"
+          CONFIG_FILE=""
+          AWS_REGION=""
+          AWS_PROFILE=""
+          WAIT="true"
+          CFN_ROLE_ARN=""
+          VERBOSE="3"
+          AWS_MAX_POLLING_WAIT_TIME="20m0s"
+          if [ -n "${CLUSTER_NAME}" ]; then
+            set -- "$@" --name="${CLUSTER_NAME}"
+          fi
+          if [ -n "${CONFIG_FILE}" ]; then
+            set -- "$@" --config-file="${CONFIG_FILE}"
+          fi
+          if [ -n "${AWS_REGION}" ]; then
+            set -- "$@" --region="${AWS_REGION}"
+          fi
+          if [ -n "${AWS_PROFILE}" ]; then
+            set -- "$@" --profile="${AWS_PROFILE}"
+          fi
+          if [ "${WAIT}" == "true" ]; then
+            set -- "$@" --wait
+          fi
+          if [ -n "${CFN_ROLE_ARN}" ]; then
+            set -- "$@" --cfn-role-arn="${CFN_ROLE_ARN}"
+          fi
+          if [ -n "${AWS_MAX_POLLING_WAIT_TIME}" ]; then
+            set -- "$@" --timeout="${AWS_MAX_POLLING_WAIT_TIME}"
+          fi
+          set -- "$@" --verbose=${VERBOSE}
+
+          eksctl delete cluster "$@"
+
+        name: Delete EKS cluster and associated resources
+        no_output_timeout: 30m
+workflows:
+  deployment:
+    jobs:
+    - aws-eks/create-cluster
+    - install-helm-on-cluster:
+        requires:
+        - aws-eks/create-cluster
+    - install-helm-chart:
+        requires:
+        - install-helm-on-cluster
+    - delete-helm-release:
+        requires:
+        - install-helm-chart
+    - aws-eks/delete-cluster:
+        requires:
+        - delete-helm-release
+  version: 2
